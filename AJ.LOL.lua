@@ -1506,7 +1506,7 @@ local weapon = {
 	hooked = false,
 	castHooks = true,
 	mouseSpoof = true,
-	cameraSpoof = true,
+	cameraSpoof = false,
 	redirect = true,
 	captureDeny = { "move", "walk", "camera", "look", "rotate", "sync", "position", "cframe", "update", "input", "mouse", "character", "humanoid", "state", "velocity", "anim", "spawn", "respawn", "weld", "ragdoll", "health" },
 	castNames = {
@@ -1595,6 +1595,13 @@ function weapon.locked()
 		return nil
 	end
 	return aim.world
+end
+
+function weapon.shotActive()
+	if weapon.firing or weapon.trigger then
+		return true
+	end
+	return (weapon.shotUntil or 0) >= os.clock()
 end
 
 function weapon.direction()
@@ -1694,9 +1701,11 @@ function weapon.rewrite(pack)
 					pack[index] = dir * reach
 					changed = changed + 1
 				end
-			elseif hasOrigin and reach >= 0.5 and reach <= 1.5 then
-				pack[index] = dir * reach
-				changed = changed + 1
+			elseif reach >= 0.5 and reach <= 1.5 then
+				if hasOrigin or value.Unit:Dot(look) >= 0.85 then
+					pack[index] = dir * reach
+					changed = changed + 1
+				end
 			end
 		elseif kind == "CFrame" then
 			if (value.Position - here).Magnitude <= 10 and value.LookVector:Dot(look) >= 0.75 then
@@ -1777,6 +1786,9 @@ function weapon.tryCast(target, method, original, ...)
 		return nil
 	end
 	if not weapon.locked() then
+		return nil
+	end
+	if not weapon.shotActive() then
 		return nil
 	end
 	local dir = weapon.direction()
@@ -1896,7 +1908,7 @@ function weapon.handle(target, method, original, ...)
 		weapon.captured = os.clock()
 		weapon.shotArgs = table.pack(table.unpack(pack, 1, pack.n))
 	end
-	if weapon.spread or weapon.locked() then
+	if weapon.locked() and (weapon.spread or weapon.isShot(name) or weapon.shotActive()) then
 		weapon.rewrite(pack)
 	end
 	return original(target, table.unpack(pack, 1, pack.n))
@@ -1928,6 +1940,7 @@ function weapon.install()
 end
 
 function weapon.shoot()
+	weapon.shotUntil = os.clock() + 0.4
 	local fired = false
 	local tool = weapon.tool()
 	if tool then
@@ -2036,21 +2049,14 @@ function weapon.recoilStep()
 		return
 	end
 	if not weapon.anchor then
-		weapon.rawCamera = true
 		weapon.anchor = camera.CFrame
-		weapon.rawCamera = false
 		return
 	end
-	weapon.rawCamera = true
 	local anchorPitch = math.asin(math.clamp(weapon.anchor.LookVector.Y, -1, 1))
 	local livePitch = math.asin(math.clamp(camera.CFrame.LookVector.Y, -1, 1))
-	weapon.rawCamera = false
 	local fix = anchorPitch - livePitch
 	if math.abs(fix) > 0.0005 then
-		weapon.rawCamera = true
-		local frame = camera.CFrame
-		weapon.rawCamera = false
-		camera.CFrame = frame * CFrame.Angles(fix, 0, 0)
+		camera.CFrame = camera.CFrame * CFrame.Angles(fix, 0, 0)
 	end
 end
 
@@ -2579,28 +2585,6 @@ for _, angle in ipairs({ 45, -45 }) do
 	}).Parent = cross
 end
 
-local aimLine = new("Frame", {
-	Name = "AimLine",
-	AnchorPoint = Vector2.new(0.5, 0.5),
-	Position = UDim2.fromScale(0.5, 0.5),
-	Size = UDim2.fromOffset(0, 2),
-	BackgroundColor3 = THEME.AccentSoft,
-	BorderSizePixel = 0,
-	Visible = false,
-	ZIndex = 2,
-})
-aimLine.Parent = overlay
-
-local aimDot = new("Frame", {
-	AnchorPoint = Vector2.new(0.5, 0.5),
-	Position = UDim2.fromScale(1, 0.5),
-	Size = UDim2.fromOffset(6, 6),
-	BackgroundColor3 = Color3.fromRGB(255, 255, 255),
-	BorderSizePixel = 0,
-	ZIndex = 3,
-}, { corner(3) })
-aimDot.Parent = aimLine
-
 local protectedIds = {}
 local protectedNames = {}
 local friendIds = {}
@@ -2745,8 +2729,6 @@ local function headWorld(plr)
 	return nil
 end
 
-local STICKY_MARGIN = 1.15
-
 local function inRing(camera, center, plr)
 	if not stillValid(plr) then
 		return nil
@@ -2780,15 +2762,6 @@ local function pickTarget(camera, center)
 			bestScreen = screen
 			bestWorld = world
 			bestDistance = distance
-		end
-	end
-	local held = silent.locked
-	if held and held ~= best then
-		local screen, world, distance = inRing(camera, center, held)
-		if screen and distance <= bestDistance * STICKY_MARGIN then
-			best = held
-			bestScreen = screen
-			bestWorld = world
 		end
 	end
 	silent.locked = best
@@ -2918,6 +2891,9 @@ local function installRayHooks()
 		return false
 	end
 	local function shotDirection(origin, direction, params)
+		if not weapon.shotActive() then
+			return nil
+		end
 		if typeof(direction) ~= "Vector3" then
 			return nil
 		end
@@ -3006,6 +2982,9 @@ local function installRayHooks()
 			if not cameraRays.on or not redirectOn or not silent.enabled then
 				return base
 			end
+			if not weapon.shotActive() then
+				return base
+			end
 			if not silent.world or not silent.locked then
 				return base
 			end
@@ -3045,6 +3024,9 @@ local function installRayHooks()
 			if weapon.mouseSpoof == false then
 				return base
 			end
+			if not weapon.shotActive() then
+				return base
+			end
 			local world = weapon.locked()
 			local camera = workspace.CurrentCamera
 			if not world or not camera then
@@ -3082,6 +3064,9 @@ local mouseHook = { installed = false, original = nil }
 
 function mouseHook.value(key)
 	if not silent.enabled or not silent.world or not silent.locked then
+		return nil
+	end
+	if not weapon.shotActive() then
 		return nil
 	end
 	if key == "X" or key == "Y" then
@@ -3135,7 +3120,7 @@ function mouseHook.install()
 	end
 	local original, restore = hookMeta(game, "__index", function(base)
 		return function(self, key)
-			if key == "CFrame" and weapon.cameraSpoof ~= false and not weapon.rawCamera
+			if key == "CFrame" and weapon.cameraSpoof and weapon.shotActive()
 				and silent.enabled and silent.world then
 				local camera = workspace.CurrentCamera
 				if self == camera then
@@ -3243,14 +3228,6 @@ local function aimStep(dt)
 	local drawCenter = overlayPoint(center)
 	ring.Position = UDim2.fromOffset(drawCenter.X, drawCenter.Y)
 	cross.Position = UDim2.fromOffset(drawCenter.X, drawCenter.Y)
-	if not screen then
-		aimLine.Visible = false
-		return
-	end
-	local drawScreen = overlayPoint(screen)
-	placeLine(aimLine, drawCenter, drawScreen, 2)
-	local pulse = 0.55 + 0.45 * math.abs(math.sin(os.clock() * 3.2))
-	aimDot.BackgroundTransparency = 1 - pulse
 end
 
 local function bindAim()
@@ -3289,7 +3266,6 @@ local function setSilent(on)
 	silent.enabled = on
 	ring.Visible = on
 	cross.Visible = on
-	aimLine.Visible = false
 	silent.target = nil
 	silent.screen = nil
 	silent.world = nil
@@ -3303,8 +3279,7 @@ local function setSilent(on)
 		mouseHook.remove()
 		unbindAim()
 		silent.locked = nil
-		aimDot.BackgroundTransparency = 0
-		notify("silent aim off", "lock released", 1.6)
+		notify("silent aim off", "shots normal", 1.6)
 	end
 end
 
@@ -3538,6 +3513,7 @@ local function onFire()
 		return
 	end
 	refreshLock()
+	weapon.shotUntil = os.clock() + 0.4
 end
 
 local fireConnection = UserInputService.InputBegan:Connect(function(input, processed)
@@ -4167,7 +4143,7 @@ end)
 makeToggle(combatUtil, "Mouse Spoof", true, function(on)
 	weapon.mouseSpoof = on and true or false
 end)
-makeToggle(combatUtil, "Camera Spoof", true, function(on)
+makeToggle(combatUtil, "Camera Spoof", false, function(on)
 	weapon.cameraSpoof = on and true or false
 end)
 syncUi.aimStatus = ui.status(combatUtil, "aim: idle")
@@ -4684,7 +4660,7 @@ task.spawn(function()
 	end
 end)
 
-notify("aj.lol  v1.8", "welcome - silent aim, esp, noclip", 4.5)
+notify("aj.lol  v1.9", "welcome - silent aim, esp, noclip", 4.5)
 
 TweenService:Create(windowScale, TweenInfo.new(0.32, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
 	Scale = 1,
@@ -4710,4 +4686,4 @@ task.spawn(function()
 	end
 end)
 
-print("[aj.lol] loaded 1.8")
+print("[aj.lol] loaded 1.9")
