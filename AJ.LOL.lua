@@ -127,6 +127,89 @@ local function guard(fn, ...)
 	return ok
 end
 
+local function wrapClosure(fn)
+	if typeof(newcclosure) == "function" then
+		return newcclosure(fn)
+	end
+	return fn
+end
+
+local function findHook()
+	if typeof(hookfunction) == "function" then
+		return hookfunction
+	end
+	if typeof(replaceclosure) == "function" then
+		return replaceclosure
+	end
+	if typeof(hookfunc) == "function" then
+		return hookfunc
+	end
+	return nil
+end
+
+local function hookMeta(instance, metamethod, factory)
+	local original = nil
+	if typeof(getrawmetatable) == "function" then
+		local okGet, mt = pcall(getrawmetatable, instance)
+		if okGet and mt then
+			local okOld, found = pcall(function()
+				return rawget(mt, metamethod)
+			end)
+			if okOld and typeof(found) == "function" then
+				original = found
+			end
+		end
+	end
+	local ref = { fn = original }
+	if typeof(hookmetamethod) == "function" then
+		local replacement = wrapClosure(factory(function(...)
+			return ref.fn(...)
+		end))
+		local ok, handle = pcall(hookmetamethod, instance, metamethod, replacement)
+		if ok then
+			if typeof(handle) == "function" then
+				ref.fn = handle
+			end
+			return ref.fn, function()
+				pcall(hookmetamethod, instance, metamethod, ref.fn)
+			end
+		end
+	end
+	if not original then
+		return nil, nil
+	end
+	local ok, mt = pcall(getrawmetatable, instance)
+	if not ok or not mt then
+		return nil, nil
+	end
+	local replacement = wrapClosure(factory(function(...)
+		return original(...)
+	end))
+	if typeof(setreadonly) == "function" then
+		pcall(setreadonly, mt, false)
+	end
+	local wrote = pcall(function()
+		mt[metamethod] = replacement
+	end)
+	if typeof(setreadonly) == "function" then
+		pcall(setreadonly, mt, true)
+	end
+	if not wrote then
+		return nil, nil
+	end
+	return original, function()
+		if typeof(setreadonly) == "function" then
+			pcall(setreadonly, mt, false)
+		end
+		pcall(function()
+			mt[metamethod] = original
+		end)
+		if typeof(setreadonly) == "function" then
+			pcall(setreadonly, mt, true)
+		end
+	end
+end
+
 local function getHumanoid()
 	local char = LocalPlayer.Character
 	if not char then
@@ -741,6 +824,170 @@ function ui.dropdown(parent, text, options, defaultIndex, callback)
 	return api
 end
 
+local ESP_COLORS = {
+	Color3.fromRGB(139, 92, 246),
+	Color3.fromRGB(124, 58, 237),
+	Color3.fromRGB(59, 130, 246),
+	Color3.fromRGB(6, 182, 212),
+	Color3.fromRGB(16, 185, 129),
+	Color3.fromRGB(132, 204, 22),
+	Color3.fromRGB(250, 204, 21),
+	Color3.fromRGB(249, 115, 22),
+	Color3.fromRGB(239, 68, 68),
+	Color3.fromRGB(236, 72, 153),
+	Color3.fromRGB(255, 255, 255),
+	Color3.fromRGB(203, 213, 225),
+	Color3.fromRGB(148, 163, 184),
+	Color3.fromRGB(100, 116, 139),
+	Color3.fromRGB(51, 65, 85),
+	Color3.fromRGB(15, 23, 42),
+	Color3.fromRGB(255, 0, 0),
+	Color3.fromRGB(0, 255, 128),
+	Color3.fromRGB(0, 162, 255),
+	Color3.fromRGB(255, 0, 255),
+	Color3.fromRGB(255, 128, 0),
+	Color3.fromRGB(0, 255, 255),
+	Color3.fromRGB(128, 0, 255),
+	Color3.fromRGB(255, 255, 0),
+}
+
+function ui.color(parent, text, initial, callback)
+	local current = initial or ESP_COLORS[1]
+	local open = false
+	local headerH = M.rowH
+	local cell = compact and 24 or 30
+	local gap = 6
+	local columns = 6
+	local rows = math.ceil(#ESP_COLORS / columns)
+	local gridH = rows * cell + (rows - 1) * gap + 12
+
+	local row = new("Frame", {
+		Size = UDim2.new(1, 0, 0, headerH),
+		BackgroundTransparency = 1,
+		LayoutOrder = nextOrder(),
+	})
+
+	local head = new("TextButton", {
+		Size = UDim2.new(1, 0, 0, headerH),
+		BackgroundTransparency = 1,
+		Text = "",
+		AutoButtonColor = false,
+		ZIndex = 2,
+	})
+	head.Parent = row
+	rowLabel(head, text, 0.42).Parent = head
+	rowLine(head)
+
+	local swatch = new("Frame", {
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -2, 0.5, 0),
+		Size = UDim2.fromOffset(M.boxW, M.boxH),
+		BackgroundColor3 = current,
+		BorderSizePixel = 0,
+		ZIndex = 3,
+	}, { corner(5), stroke(THEME.RowBorder, 1, 0.1) })
+	swatch.Parent = head
+
+	local palette = new("Frame", {
+		Position = UDim2.fromOffset(0, headerH),
+		Size = UDim2.new(1, 0, 0, 0),
+		BackgroundColor3 = THEME.Field,
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		ClipsDescendants = true,
+		Visible = false,
+		ZIndex = 1,
+	}, {
+		corner(6),
+		new("UIGridLayout", {
+			CellSize = UDim2.fromOffset(cell, cell),
+			CellPadding = UDim2.fromOffset(gap, gap),
+			SortOrder = Enum.SortOrder.LayoutOrder,
+			HorizontalAlignment = Enum.HorizontalAlignment.Center,
+		}),
+		new("UIPadding", {
+			PaddingTop = UDim.new(0, 6),
+			PaddingBottom = UDim.new(0, 6),
+		}),
+	})
+	palette.Parent = row
+
+	local function setOpen(state)
+		open = state
+		if state then
+			palette.Visible = true
+		end
+		TweenService:Create(row, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+			Size = UDim2.new(1, 0, 0, state and (headerH + gridH) or headerH),
+		}):Play()
+		TweenService:Create(palette, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+			Size = UDim2.new(1, 0, 0, state and gridH or 0),
+		}):Play()
+		TweenService:Create(palette, TweenInfo.new(0.18), {
+			BackgroundTransparency = state and 0.35 or 1,
+		}):Play()
+		if not state then
+			task.delay(0.22, function()
+				if not open then
+					palette.Visible = false
+				end
+			end)
+		end
+	end
+
+	local chips = {}
+	for index, color in ipairs(ESP_COLORS) do
+		local chip = new("TextButton", {
+			Size = UDim2.fromOffset(cell, cell),
+			BackgroundColor3 = color,
+			BorderSizePixel = 0,
+			Text = "",
+			AutoButtonColor = false,
+			LayoutOrder = index,
+			ZIndex = 2,
+		}, { corner(5) })
+		if color == current then
+			stroke(Color3.fromRGB(255, 255, 255), 2).Parent = chip
+		end
+		chip.MouseButton1Click:Connect(function()
+			current = color
+			swatch.BackgroundColor3 = color
+			for _, other in ipairs(chips) do
+				local old = other:FindFirstChildOfClass("UIStroke")
+				if old then
+					old:Destroy()
+				end
+			end
+			stroke(Color3.fromRGB(255, 255, 255), 2).Parent = chip
+			setOpen(false)
+			guard(callback, color)
+		end)
+		chip.Parent = palette
+		chips[index] = chip
+	end
+
+	head.MouseButton1Click:Connect(function()
+		setOpen(not open)
+	end)
+
+	row.Parent = parent
+
+	local api = {}
+	function api.set(color)
+		for _, value in ipairs(ESP_COLORS) do
+			if value == color then
+				current = value
+				swatch.BackgroundColor3 = value
+				return
+			end
+		end
+	end
+	function api.get()
+		return current
+	end
+	return api
+end
+
 local function makeSlider(parent, text, min, max, default, precision, callback)
 	local value = math.clamp(default, min, max)
 	local dragging = false
@@ -1259,9 +1506,10 @@ local weapon = {
 	hooked = false,
 	castHooks = true,
 	mouseSpoof = true,
+	cameraSpoof = true,
 	redirect = true,
 	captureDeny = { "move", "walk", "camera", "look", "rotate", "sync", "position", "cframe", "update", "input", "mouse", "character", "humanoid", "state", "velocity", "anim", "spawn", "respawn", "weld", "ragdoll", "health" },
-	castMethods = {
+	castNames = {
 		Raycast = true,
 		FindPartOnRay = true,
 		FindPartOnRayWithIgnoreList = true,
@@ -1464,7 +1712,7 @@ function weapon.rewrite(pack)
 	end
 end
 
-function weapon.originish(origin)
+function weapon.nearAimOrigin(origin)
 	if typeof(origin) ~= "Vector3" then
 		return false
 	end
@@ -1480,7 +1728,7 @@ function weapon.originish(origin)
 	return false
 end
 
-function weapon.shotLike(pack)
+function weapon.looksLikeShot(pack)
 	local camera = workspace.CurrentCamera
 	if not camera or type(pack) ~= "table" then
 		return false
@@ -1508,7 +1756,7 @@ function weapon.shotLike(pack)
 	return false
 end
 
-function weapon.captureLike(name, pack)
+function weapon.captureShot(name, pack)
 	if not weapon.firing or type(pack) ~= "table" then
 		return false
 	end
@@ -1518,11 +1766,11 @@ function weapon.captureLike(name, pack)
 			return false
 		end
 	end
-	return weapon.shotLike(pack)
+	return weapon.looksLikeShot(pack)
 end
 
 function weapon.tryCast(target, method, original, ...)
-	if type(method) ~= "string" or not weapon.castMethods[method] then
+	if type(method) ~= "string" or not weapon.castNames[method] then
 		return nil
 	end
 	if weapon.castHooks == false or weapon.redirect == false then
@@ -1540,7 +1788,7 @@ function weapon.tryCast(target, method, original, ...)
 
 	if method == "Raycast" and typeof(args[1]) == "Vector3" and typeof(args[2]) == "Vector3" then
 		local reach = args[2].Magnitude
-		if reach > 0.01 and weapon.originish(args[1]) then
+		if reach > 0.01 and weapon.nearAimOrigin(args[1]) then
 			args[2] = dir * reach
 			return table.pack(original(target, table.unpack(args, 1, args.n)))
 		end
@@ -1559,7 +1807,7 @@ function weapon.tryCast(target, method, original, ...)
 
 	if method == "Spherecast" and typeof(args[1]) == "Vector3" and typeof(args[3]) == "Vector3" then
 		local reach = args[3].Magnitude
-		if reach > 0.01 and weapon.originish(args[1]) then
+		if reach > 0.01 and weapon.nearAimOrigin(args[1]) then
 			args[3] = dir * reach
 			return table.pack(original(target, table.unpack(args, 1, args.n)))
 		end
@@ -1568,7 +1816,7 @@ function weapon.tryCast(target, method, original, ...)
 
 	if method == "Blockcast" and typeof(args[1]) == "CFrame" and typeof(args[3]) == "Vector3" then
 		local reach = args[3].Magnitude
-		if reach > 0.01 and weapon.originish(args[1].Position) then
+		if reach > 0.01 and weapon.nearAimOrigin(args[1].Position) then
 			args[3] = dir * reach
 			return table.pack(original(target, table.unpack(args, 1, args.n)))
 		end
@@ -1592,7 +1840,7 @@ function weapon.tryCast(target, method, original, ...)
 	end
 
 	if method == "GetMouseLocation" then
-		if weapon.mouseSpoof == false or (not weapon.firing and not weapon.trigger) then
+		if weapon.mouseSpoof == false then
 			return nil
 		end
 		if target ~= UserInputService or not camera then
@@ -1641,7 +1889,7 @@ function weapon.handle(target, method, original, ...)
 		weapon.method = method
 		weapon.captured = os.clock()
 		weapon.shotArgs = table.pack(table.unpack(pack, 1, pack.n))
-	elseif weapon.captureLike(name, pack)
+	elseif weapon.captureShot(name, pack)
 		and (not weapon.remote or os.clock() - (weapon.captured or 0) > 0.35) then
 		weapon.remote = target
 		weapon.method = method
@@ -1658,28 +1906,24 @@ function weapon.install()
 	if weapon.hooked then
 		return
 	end
-	if typeof(hookmetamethod) ~= "function" then
+	if typeof(getnamecallmethod) ~= "function" then
 		return
 	end
-	local ok = pcall(function()
-		local original
-		original = hookmetamethod(game, "__namecall", newcclosure(function(target, ...)
+	local original = hookMeta(game, "__namecall", function(base)
+		return function(target, ...)
 			local method = getnamecallmethod()
 			if method == "FireServer" or method == "InvokeServer" then
-				return weapon.handle(target, method, original, ...)
+				return weapon.handle(target, method, base, ...)
 			end
-			local cast = weapon.tryCast(target, method, original, ...)
+			local cast = weapon.tryCast(target, method, base, ...)
 			if cast then
 				return table.unpack(cast, 1, cast.n)
 			end
-			return original(target, ...)
-		end))
-		if typeof(original) == "function" then
-			weapon.hooked = true
+			return base(target, ...)
 		end
 	end)
-	if not ok then
-		weapon.hooked = false
+	if typeof(original) == "function" then
+		weapon.hooked = true
 	end
 end
 
@@ -1792,14 +2036,21 @@ function weapon.recoilStep()
 		return
 	end
 	if not weapon.anchor then
+		weapon.rawCamera = true
 		weapon.anchor = camera.CFrame
+		weapon.rawCamera = false
 		return
 	end
+	weapon.rawCamera = true
 	local anchorPitch = math.asin(math.clamp(weapon.anchor.LookVector.Y, -1, 1))
 	local livePitch = math.asin(math.clamp(camera.CFrame.LookVector.Y, -1, 1))
+	weapon.rawCamera = false
 	local fix = anchorPitch - livePitch
 	if math.abs(fix) > 0.0005 then
-		camera.CFrame = camera.CFrame * CFrame.Angles(fix, 0, 0)
+		weapon.rawCamera = true
+		local frame = camera.CFrame
+		weapon.rawCamera = false
+		camera.CFrame = frame * CFrame.Angles(fix, 0, 0)
 	end
 end
 
@@ -1886,6 +2137,7 @@ local esp = {
 	objects = {},
 	connections = {},
 	loop = nil,
+	color = Color3.fromRGB(139, 92, 246),
 }
 
 local function destroyEspObject(char)
@@ -1941,10 +2193,11 @@ local function attachEsp(plr, char)
 		return
 	end
 	local anchor = char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart")
+	local tint = esp.color
 	local highlight = new("Highlight", {
-		FillColor = THEME.AccentSoft,
+		FillColor = tint,
 		FillTransparency = 0.35,
-		OutlineColor = Color3.fromRGB(190, 140, 255),
+		OutlineColor = tint:Lerp(Color3.new(1, 1, 1), 0.35),
 		OutlineTransparency = 0.05,
 		Adornee = char,
 		DepthMode = Enum.HighlightDepthMode.AlwaysOnTop,
@@ -1995,7 +2248,7 @@ local function attachEsp(plr, char)
 
 		fill = new("Frame", {
 			Size = UDim2.fromScale(1, 1),
-			BackgroundColor3 = THEME.AccentSoft,
+			BackgroundColor3 = tint,
 			BorderSizePixel = 0,
 		}, { corner(2) })
 		fill.Parent = track
@@ -2007,7 +2260,7 @@ local function attachEsp(plr, char)
 			Font = THEME.Font,
 			Text = "0m",
 			TextSize = 11,
-			TextColor3 = THEME.AccentText,
+			TextColor3 = tint,
 			TextXAlignment = Enum.TextXAlignment.Center,
 		})
 		distance.Parent = holder
@@ -2033,7 +2286,7 @@ local function startEspLoop()
 				if humanoid and obj.fill then
 					local ratio = humanoid.Health / math.max(humanoid.MaxHealth, 1)
 					obj.fill.Size = UDim2.new(math.clamp(ratio, 0, 1), 0, 1, 0)
-					obj.fill.BackgroundColor3 = ratio > 0.5 and THEME.AccentSoft
+					obj.fill.BackgroundColor3 = ratio > 0.5 and esp.color
 						or (ratio > 0.2 and Color3.fromRGB(226, 178, 66) or Color3.fromRGB(214, 74, 74))
 				end
 				if root and obj.distance and Camera then
@@ -2091,6 +2344,36 @@ local function setEsp(on)
 		end
 	end))
 	startEspLoop()
+end
+
+local function applyEspColor(color)
+	if typeof(color) ~= "Color3" then
+		return
+	end
+	esp.color = color
+	local outline = color:Lerp(Color3.new(1, 1, 1), 0.35)
+	for _, obj in pairs(esp.objects) do
+		if obj.highlight then
+			obj.highlight.FillColor = color
+			obj.highlight.OutlineColor = outline
+		end
+		if obj.distance then
+			obj.distance.TextColor3 = color
+		end
+		if obj.bones then
+			for _, frame in ipairs(obj.bones) do
+				frame.BackgroundColor3 = color
+			end
+		end
+		if obj.box then
+			for _, frame in ipairs(obj.box) do
+				frame.BackgroundColor3 = color
+			end
+		end
+		if obj.tracer then
+			obj.tracer.BackgroundColor3 = color
+		end
+	end
 end
 
 silent = {
@@ -2559,9 +2842,11 @@ local function aimDirection(origin)
 end
 
 local function installRayHooks()
-	if typeof(hookfunction) ~= "function" or #rayHooks > 0 then
+	local hookFn = findHook()
+	if not hookFn or #rayHooks > 0 then
 		return false
 	end
+	weapon.hookFn = hookFn
 	local function hook(host, name, builder, isCamera)
 		local ok, target = pcall(function()
 			return host[name]
@@ -2577,7 +2862,7 @@ local function installRayHooks()
 			if typeof(newcclosure) == "function" then
 				replacement = newcclosure(replacement)
 			end
-			return hookfunction(target, replacement)
+			return hookFn(target, replacement)
 		end)
 		if okHook and handle then
 			ref.fn = handle
@@ -2757,7 +3042,7 @@ local function installRayHooks()
 	hook(UserInputService, "GetMouseLocation", function(original)
 		return function(self, ...)
 			local base = original(self, ...)
-			if weapon.mouseSpoof == false or (not weapon.firing and not weapon.trigger) then
+			if weapon.mouseSpoof == false then
 				return base
 			end
 			local world = weapon.locked()
@@ -2784,8 +3069,8 @@ local function removeRayHooks()
 			if not pcall(restorefunction, entry.original) then
 				pcall(restorefunction, entry.handle)
 			end
-		elseif typeof(hookfunction) == "function" then
-			pcall(hookfunction, entry.handle, entry.original)
+		elseif weapon.hookFn then
+			pcall(weapon.hookFn, entry.handle, entry.original)
 		end
 	end
 	table.clear(rayHooks)
@@ -2845,12 +3130,23 @@ function mouseHook.value(key)
 end
 
 function mouseHook.install()
-	if mouseHook.installed or typeof(hookmetamethod) ~= "function" then
+	if mouseHook.installed then
 		return false
 	end
-	local ok = pcall(function()
-		local original
-		original = hookmetamethod(game, "__index", newcclosure(function(self, key)
+	local original, restore = hookMeta(game, "__index", function(base)
+		return function(self, key)
+			if key == "CFrame" and weapon.cameraSpoof ~= false and not weapon.rawCamera
+				and silent.enabled and silent.world then
+				local camera = workspace.CurrentCamera
+				if self == camera then
+					local frame = base(self, key)
+					local delta = silent.world - frame.Position
+					if delta.Magnitude > 0.05 then
+						return CFrame.lookAt(frame.Position, frame.Position + delta)
+					end
+					return frame
+				end
+			end
 			if key == "Hit" or key == "UnitRay" or key == "Target" or key == "X" or key == "Y" then
 				local okMouse, isMouse = pcall(function()
 					return self:IsA("Mouse")
@@ -2862,25 +3158,21 @@ function mouseHook.install()
 					end
 				end
 			end
-			return original(self, key)
-		end))
-		if typeof(original) == "function" then
-			mouseHook.original = original
-			mouseHook.installed = true
+			return base(self, key)
 		end
 	end)
-	if not ok then
-		mouseHook.installed = false
+	if typeof(original) == "function" then
+		mouseHook.original = original
+		mouseHook.restore = restore
+		mouseHook.installed = true
 	end
 	return mouseHook.installed
 end
 
 function mouseHook.remove()
-	if not mouseHook.installed or not mouseHook.original then
-		return
-	end
-	if typeof(hookmetamethod) == "function" then
-		pcall(hookmetamethod, game, "__index", mouseHook.original)
+	if mouseHook.restore then
+		pcall(mouseHook.restore)
+		mouseHook.restore = nil
 	end
 	mouseHook.installed = false
 	mouseHook.original = nil
@@ -2890,6 +3182,7 @@ local function resolveAimMethod()
 	if not hooksWanted then
 		return "off"
 	end
+	weapon.install()
 	installRayHooks()
 	mouseHook.install()
 	local castCount = 0
@@ -2907,6 +3200,9 @@ local function resolveAimMethod()
 	end
 	if camCount > 0 and cameraRays.on then
 		table.insert(parts, "cam")
+	end
+	if weapon.hooked then
+		table.insert(parts, "call")
 	end
 	if mouseHook.installed then
 		table.insert(parts, "mouse")
@@ -3065,7 +3361,7 @@ local function ensureEspExtras(obj)
 		for i = 1, 16 do
 			local f = new("Frame", {
 				AnchorPoint = Vector2.new(0, 0.5),
-				BackgroundColor3 = Color3.fromRGB(242, 242, 252),
+				BackgroundColor3 = esp.color,
 				BorderSizePixel = 0,
 				Visible = false,
 				ZIndex = 2,
@@ -3079,7 +3375,7 @@ local function ensureEspExtras(obj)
 		for i = 1, 4 do
 			local f = new("Frame", {
 				AnchorPoint = Vector2.new(0, 0.5),
-				BackgroundColor3 = THEME.AccentSoft,
+				BackgroundColor3 = esp.color,
 				BorderSizePixel = 0,
 				Visible = false,
 				ZIndex = 2,
@@ -3091,7 +3387,7 @@ local function ensureEspExtras(obj)
 	if espStyle.tracers and not obj.tracer then
 		local f = new("Frame", {
 			AnchorPoint = Vector2.new(0, 0.5),
-			BackgroundColor3 = THEME.AccentSoft,
+			BackgroundColor3 = esp.color,
 			BorderSizePixel = 0,
 			Visible = false,
 			ZIndex = 2,
@@ -3364,7 +3660,11 @@ local function loadPosition()
 	end
 end
 
-local dump = {
+local dump
+local startDump
+
+do
+dump = {
 	running = false,
 	links = {},
 	folder = nil,
@@ -3751,7 +4051,7 @@ local function buildDump()
 	dump.links = links
 
 	local share = {}
-	table.insert(share, "aj.lol game dump — " .. game.Name .. " — " .. stamp)
+	table.insert(share, "aj.lol game dump - " .. game.Name .. " - " .. stamp)
 	table.insert(share, string.format("%d instances, %d script sources, %d blocked", treeLines, scriptCount, sourceBlocked))
 	if treeSaved then
 		table.insert(share, "local: " .. folder)
@@ -3760,7 +4060,7 @@ local function buildDump()
 		table.insert(share, entry.label .. ": " .. entry.url)
 	end
 	if #links == 0 then
-		table.insert(share, "no upload — this executor has no http.request / request, dump is local only")
+		table.insert(share, "no upload - this executor has no http.request / request, dump is local only")
 	end
 	local shareText = table.concat(share, "\n")
 
@@ -3783,7 +4083,7 @@ local function buildDump()
 	end
 end
 
-local function startDump()
+function startDump()
 	if dump.running then
 		notify("dump running", "already working", 2)
 		return
@@ -3799,6 +4099,7 @@ local function startDump()
 			notify("dump failed", tostring(err):sub(1, 60), 6)
 		end
 	end)
+end
 end
 
 local playerPage = makePage("Player")
@@ -3865,6 +4166,9 @@ makeToggle(combatUtil, "Camera Rays", true, function(on)
 end)
 makeToggle(combatUtil, "Mouse Spoof", true, function(on)
 	weapon.mouseSpoof = on and true or false
+end)
+makeToggle(combatUtil, "Camera Spoof", true, function(on)
+	weapon.cameraSpoof = on and true or false
 end)
 syncUi.aimStatus = ui.status(combatUtil, "aim: idle")
 makeToggle(combatUtil, "Log Remotes", false, function(on)
@@ -3964,7 +4268,7 @@ local dumpStatusLabel = new("TextLabel", {
 	AutomaticSize = Enum.AutomaticSize.Y,
 	BackgroundTransparency = 1,
 	Font = THEME.Font,
-	Text = "idle — no dump yet",
+	Text = "idle - no dump yet",
 	TextSize = M.labelSize - 1,
 	TextColor3 = THEME.TextFaint,
 	TextXAlignment = Enum.TextXAlignment.Left,
@@ -3985,7 +4289,7 @@ local dumpLinkBox = new("TextBox", {
 	BorderSizePixel = 0,
 	Font = THEME.Font,
 	Text = "",
-	PlaceholderText = "dump links show up here — tap to select",
+	PlaceholderText = "dump links show up here - tap to select",
 	PlaceholderColor3 = THEME.TextFaint,
 	TextSize = M.labelSize - 2,
 	TextColor3 = THEME.TextDim,
@@ -4092,6 +4396,9 @@ end)
 makeToggle(settingsUtil, "Keep Menu On Respawn", true, function(on)
 	gui.ResetOnSpawn = on
 end)
+
+local settingsEsp = section(settingsPage, "ESP")
+ui.color(settingsEsp, "ESP Color", esp.color, applyEspColor)
 
 for _, entry in pairs(pages) do
 	if entry.page == playerPage then
@@ -4377,7 +4684,7 @@ task.spawn(function()
 	end
 end)
 
-notify("aj.lol  v1.7", "welcome - universal Silent Aim, ESP, Noclip ready", 4.5)
+notify("aj.lol  v1.8", "welcome - silent aim, esp, noclip", 4.5)
 
 TweenService:Create(windowScale, TweenInfo.new(0.32, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
 	Scale = 1,
@@ -4403,4 +4710,4 @@ task.spawn(function()
 	end
 end)
 
-print("[aj.lol] loaded 1.7")
+print("[aj.lol] loaded 1.8")
