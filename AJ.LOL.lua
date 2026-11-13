@@ -1237,6 +1237,8 @@ local function setAntiAfk(on)
 	end)
 end
 
+local silent
+
 local weapon = {
 	ammo = false,
 	recoil = false,
@@ -1255,6 +1257,21 @@ local weapon = {
 	captured = 0,
 	tables = {},
 	hooked = false,
+	castHooks = true,
+	mouseSpoof = true,
+	redirect = true,
+	captureDeny = { "move", "walk", "camera", "look", "rotate", "sync", "position", "cframe", "update", "input", "mouse", "character", "humanoid", "state", "velocity", "anim", "spawn", "respawn", "weld", "ragdoll", "health" },
+	castMethods = {
+		Raycast = true,
+		FindPartOnRay = true,
+		FindPartOnRayWithIgnoreList = true,
+		FindPartOnRayWithWhitelist = true,
+		Spherecast = true,
+		Blockcast = true,
+		ScreenPointToRay = true,
+		ViewportPointToRay = true,
+		GetMouseLocation = true,
+	},
 	aim = nil,
 	keys = {
 		ammo = true,
@@ -1271,7 +1288,7 @@ local weapon = {
 		shots = true,
 	},
 	deny = { "damage", "dmg", "speed", "rate", "time", "multiplier", "force", "power", "cost", "price", "attachment", "drop", "cooldown", "delay", "interval", "period", "reload" },
-	verbs = { "fire", "shoot", "shot", "attack", "bullet", "hit", "gun", "weapon", "damage", "swing", "blast", "ray" },
+	verbs = { "fire", "shoot", "shot", "attack", "bullet", "hit", "gun", "weapon", "damage", "swing", "blast", "ray", "arrow", "bow", "laser", "beam", "projectile", "snipe", "rifle", "pistol", "shotgun", "smg", "lmg", "dmg", "pierce", "cast", "spell", "melee", "punch", "taser", "gunfire", "muzzle" },
 }
 
 function weapon.tool()
@@ -1333,6 +1350,9 @@ function weapon.locked()
 end
 
 function weapon.direction()
+	if weapon.redirect == false then
+		return nil
+	end
 	local camera = workspace.CurrentCamera
 	if not camera then
 		return nil
@@ -1384,7 +1404,8 @@ function weapon.walk(container, here, look, dir, depth)
 			end
 		elseif kind == "CFrame" then
 			local named = type(key) == "string" and weapon.frames[string.lower(key)]
-			if named or (value.Position - here).Magnitude <= 10 then
+			local facing = value.LookVector:Dot(look) >= 0.75
+			if named or ((value.Position - here).Magnitude <= 10 and facing) then
 				container[key] = CFrame.lookAt(value.Position, value.Position + dir)
 				changed = changed + 1
 			end
@@ -1430,7 +1451,7 @@ function weapon.rewrite(pack)
 				changed = changed + 1
 			end
 		elseif kind == "CFrame" then
-			if (value.Position - here).Magnitude <= 10 then
+			if (value.Position - here).Magnitude <= 10 and value.LookVector:Dot(look) >= 0.75 then
 				pack[index] = CFrame.lookAt(value.Position, value.Position + dir)
 				changed = changed + 1
 			end
@@ -1441,6 +1462,154 @@ function weapon.rewrite(pack)
 	if changed > 0 then
 		silent.stats.remotes = silent.stats.remotes + changed
 	end
+end
+
+function weapon.originish(origin)
+	if typeof(origin) ~= "Vector3" then
+		return false
+	end
+	local camera = workspace.CurrentCamera
+	if camera and (origin - camera.CFrame.Position).Magnitude <= 60 then
+		return true
+	end
+	local char = LocalPlayer.Character
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	if root and (origin - root.Position).Magnitude <= 30 then
+		return true
+	end
+	return false
+end
+
+function weapon.shotLike(pack)
+	local camera = workspace.CurrentCamera
+	if not camera or type(pack) ~= "table" then
+		return false
+	end
+	local here = camera.CFrame.Position
+	local look = camera.CFrame.LookVector
+	for index = 1, math.min(pack.n or 0, 10) do
+		local value = pack[index]
+		local kind = typeof(value)
+		if kind == "Vector3" then
+			local reach = value.Magnitude
+			if reach >= 0.5 and reach <= 1.5 and value:Dot(look) >= 0.6 then
+				return true
+			end
+			local offset = value - here
+			if offset.Magnitude > 12 and offset.Unit:Dot(look) >= 0.6 then
+				return true
+			end
+		elseif kind == "CFrame" then
+			if (value.Position - here).Magnitude <= 12 and value.LookVector:Dot(look) >= 0.6 then
+				return true
+			end
+		end
+	end
+	return false
+end
+
+function weapon.captureLike(name, pack)
+	if not weapon.firing or type(pack) ~= "table" then
+		return false
+	end
+	local lower = string.lower(tostring(name or ""))
+	for _, word in ipairs(weapon.captureDeny) do
+		if string.find(lower, word, 1, true) then
+			return false
+		end
+	end
+	return weapon.shotLike(pack)
+end
+
+function weapon.tryCast(target, method, original, ...)
+	if type(method) ~= "string" or not weapon.castMethods[method] then
+		return nil
+	end
+	if weapon.castHooks == false or weapon.redirect == false then
+		return nil
+	end
+	if not weapon.locked() then
+		return nil
+	end
+	local dir = weapon.direction()
+	if not dir then
+		return nil
+	end
+	local camera = workspace.CurrentCamera
+	local args = table.pack(...)
+
+	if method == "Raycast" and typeof(args[1]) == "Vector3" and typeof(args[2]) == "Vector3" then
+		local reach = args[2].Magnitude
+		if reach > 0.01 and weapon.originish(args[1]) then
+			args[2] = dir * reach
+			return table.pack(original(target, table.unpack(args, 1, args.n)))
+		end
+		return nil
+	end
+
+	if method == "FindPartOnRay" or method == "FindPartOnRayWithIgnoreList" or method == "FindPartOnRayWithWhitelist" then
+		local ray = args[1]
+		if typeof(ray) == "Ray" then
+			local span = ray.Direction.Magnitude
+			args[1] = Ray.new(ray.Origin, dir * (span > 0.01 and span or 1))
+			return table.pack(original(target, table.unpack(args, 1, args.n)))
+		end
+		return nil
+	end
+
+	if method == "Spherecast" and typeof(args[1]) == "Vector3" and typeof(args[3]) == "Vector3" then
+		local reach = args[3].Magnitude
+		if reach > 0.01 and weapon.originish(args[1]) then
+			args[3] = dir * reach
+			return table.pack(original(target, table.unpack(args, 1, args.n)))
+		end
+		return nil
+	end
+
+	if method == "Blockcast" and typeof(args[1]) == "CFrame" and typeof(args[3]) == "Vector3" then
+		local reach = args[3].Magnitude
+		if reach > 0.01 and weapon.originish(args[1].Position) then
+			args[3] = dir * reach
+			return table.pack(original(target, table.unpack(args, 1, args.n)))
+		end
+		return nil
+	end
+
+	if method == "ScreenPointToRay" or method == "ViewportPointToRay" then
+		local okCam, isCamera = pcall(function()
+			return target:IsA("Camera")
+		end)
+		if not okCam or not isCamera then
+			return nil
+		end
+		local results = table.pack(original(target, table.unpack(args, 1, args.n)))
+		local ray = results[1]
+		if typeof(ray) == "Ray" then
+			local span = ray.Direction.Magnitude
+			results[1] = Ray.new(ray.Origin, dir * (span > 0.01 and span or 1))
+		end
+		return results
+	end
+
+	if method == "GetMouseLocation" then
+		if weapon.mouseSpoof == false or (not weapon.firing and not weapon.trigger) then
+			return nil
+		end
+		if target ~= UserInputService or not camera then
+			return nil
+		end
+		local world = weapon.locked()
+		if not world then
+			return nil
+		end
+		local point = camera:WorldToViewportPoint(world)
+		if point.Z <= 0 then
+			return nil
+		end
+		return table.pack(Vector2.new(point.X, point.Y))
+	end
+
+	return nil
 end
 
 function weapon.handle(target, method, original, ...)
@@ -1472,6 +1641,12 @@ function weapon.handle(target, method, original, ...)
 		weapon.method = method
 		weapon.captured = os.clock()
 		weapon.shotArgs = table.pack(table.unpack(pack, 1, pack.n))
+	elseif weapon.captureLike(name, pack)
+		and (not weapon.remote or os.clock() - (weapon.captured or 0) > 0.35) then
+		weapon.remote = target
+		weapon.method = method
+		weapon.captured = os.clock()
+		weapon.shotArgs = table.pack(table.unpack(pack, 1, pack.n))
 	end
 	if weapon.spread or weapon.locked() then
 		weapon.rewrite(pack)
@@ -1492,6 +1667,10 @@ function weapon.install()
 			local method = getnamecallmethod()
 			if method == "FireServer" or method == "InvokeServer" then
 				return weapon.handle(target, method, original, ...)
+			end
+			local cast = weapon.tryCast(target, method, original, ...)
+			if cast then
+				return table.unpack(cast, 1, cast.n)
 			end
 			return original(target, ...)
 		end))
@@ -1914,7 +2093,7 @@ local function setEsp(on)
 	startEspLoop()
 end
 
-local silent = {
+silent = {
 	enabled = false,
 	fov = 220,
 	target = nil,
@@ -2247,7 +2426,7 @@ local function headWorld(plr)
 	local nearest = nil
 	local nearestDistance = math.huge
 	for _, name in ipairs(names) do
-		local part = char:FindFirstChild(name)
+		local part = char:FindFirstChild(name) or char:FindFirstChild(name, true)
 		if part and part:IsA("BasePart") then
 			if silent.bone == "Nearest" then
 				local distance = camera and (part.Position - camera.CFrame.Position).Magnitude or 0
@@ -2262,11 +2441,19 @@ local function headWorld(plr)
 		end
 	end
 	local target = chosen or nearest
+	if not target then
+		for _, part in ipairs(char:GetDescendants()) do
+			if part:IsA("BasePart") and string.find(string.lower(part.Name), "head", 1, true) then
+				target = part
+				break
+			end
+		end
+	end
 	if target then
 		silent.worldPart = target
 		return target.Position
 	end
-	local root = char:FindFirstChild("HumanoidRootPart")
+	local root = char:FindFirstChild("HumanoidRootPart") or char.PrimaryPart
 	if root and root:IsA("BasePart") then
 		silent.worldPart = root
 		return root.Position + Vector3.new(0, HEAD_FALLBACK_LIFT, 0)
@@ -2402,12 +2589,12 @@ local function installRayHooks()
 			return false
 		end
 		local camera = workspace.CurrentCamera
-		if camera and (origin - camera.CFrame.Position).Magnitude <= 30 then
+		if camera and (origin - camera.CFrame.Position).Magnitude <= 60 then
 			return true
 		end
 		local char = LocalPlayer.Character
 		local root = char and char:FindFirstChild("HumanoidRootPart")
-		if root and (origin - root.Position).Magnitude <= 14 then
+		if root and (origin - root.Position).Magnitude <= 30 then
 			return true
 		end
 		return false
@@ -2446,7 +2633,14 @@ local function installRayHooks()
 		return false
 	end
 	local function shotDirection(origin, direction, params)
-		if typeof(direction) ~= "Vector3" or not isShotOrigin(origin) then
+		if typeof(direction) ~= "Vector3" then
+			return nil
+		end
+		local plausible = isShotOrigin(origin)
+		if not plausible and params ~= nil then
+			plausible = isPlayerFilter(params)
+		end
+		if not plausible then
 			return nil
 		end
 		local reach = direction.Magnitude
@@ -2560,6 +2754,24 @@ local function installRayHooks()
 		hook(Camera, "ScreenPointToRay", cameraRayBuilder, true)
 		hook(Camera, "ViewportPointToRay", cameraRayBuilder, true)
 	end
+	hook(UserInputService, "GetMouseLocation", function(original)
+		return function(self, ...)
+			local base = original(self, ...)
+			if weapon.mouseSpoof == false or (not weapon.firing and not weapon.trigger) then
+				return base
+			end
+			local world = weapon.locked()
+			local camera = workspace.CurrentCamera
+			if not world or not camera then
+				return base
+			end
+			local point = camera:WorldToViewportPoint(world)
+			if point.Z <= 0 then
+				return base
+			end
+			return Vector2.new(point.X, point.Y)
+		end
+	end)
 	return #rayHooks > 0
 end
 
@@ -2586,6 +2798,20 @@ local mouseHook = { installed = false, original = nil }
 function mouseHook.value(key)
 	if not silent.enabled or not silent.world or not silent.locked then
 		return nil
+	end
+	if key == "X" or key == "Y" then
+		if weapon.mouseSpoof == false then
+			return nil
+		end
+		local camera = workspace.CurrentCamera
+		if not camera then
+			return nil
+		end
+		local point = camera:WorldToViewportPoint(silent.world)
+		if point.Z <= 0 then
+			return nil
+		end
+		return key == "X" and point.X or point.Y
 	end
 	if key == "UnitRay" then
 		local camera = workspace.CurrentCamera
@@ -2625,7 +2851,7 @@ function mouseHook.install()
 	local ok = pcall(function()
 		local original
 		original = hookmetamethod(game, "__index", newcclosure(function(self, key)
-			if key == "Hit" or key == "UnitRay" or key == "Target" then
+			if key == "Hit" or key == "UnitRay" or key == "Target" or key == "X" or key == "Y" then
 				local okMouse, isMouse = pcall(function()
 					return self:IsA("Mouse")
 				end)
@@ -2693,6 +2919,7 @@ end
 
 local function setHooks(on)
 	hooksWanted = on and true or false
+	weapon.castHooks = hooksWanted
 	if not silent.enabled then
 		return
 	end
@@ -2988,6 +3215,7 @@ end)
 
 local function setRedirect(on)
 	redirectOn = on and true or false
+	weapon.redirect = redirectOn
 	if syncUi.redirectCombat then
 		syncUi.redirectCombat.set(redirectOn)
 	end
@@ -3635,6 +3863,9 @@ syncUi.redirectCombat = makeToggle(combatUtil, "Shot Redirect", true, setRedirec
 makeToggle(combatUtil, "Camera Rays", true, function(on)
 	cameraRays.on = on and true or false
 end)
+makeToggle(combatUtil, "Mouse Spoof", true, function(on)
+	weapon.mouseSpoof = on and true or false
+end)
 syncUi.aimStatus = ui.status(combatUtil, "aim: idle")
 makeToggle(combatUtil, "Log Remotes", false, function(on)
 	weapon.log = on and true or false
@@ -4146,7 +4377,7 @@ task.spawn(function()
 	end
 end)
 
-notify("aj.lol  v1.6", "welcome - Silent Aim, ESP, Noclip ready", 4.5)
+notify("aj.lol  v1.7", "welcome - universal Silent Aim, ESP, Noclip ready", 4.5)
 
 TweenService:Create(windowScale, TweenInfo.new(0.32, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
 	Scale = 1,
@@ -4172,4 +4403,4 @@ task.spawn(function()
 	end
 end)
 
-print("[aj.lol] loaded 1.6")
+print("[aj.lol] loaded 1.7")
