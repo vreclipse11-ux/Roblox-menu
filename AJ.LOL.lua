@@ -2585,6 +2585,28 @@ for _, angle in ipairs({ 45, -45 }) do
 	}).Parent = cross
 end
 
+local aimLine = new("Frame", {
+	Name = "AimLine",
+	AnchorPoint = Vector2.new(0.5, 0.5),
+	Position = UDim2.fromScale(0.5, 0.5),
+	Size = UDim2.fromOffset(0, 2),
+	BackgroundColor3 = THEME.AccentSoft,
+	BorderSizePixel = 0,
+	Visible = false,
+	ZIndex = 2,
+})
+aimLine.Parent = overlay
+
+local aimDot = new("Frame", {
+	AnchorPoint = Vector2.new(0.5, 0.5),
+	Position = UDim2.fromScale(1, 0.5),
+	Size = UDim2.fromOffset(6, 6),
+	BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+	BorderSizePixel = 0,
+	ZIndex = 3,
+}, { corner(3) })
+aimDot.Parent = aimLine
+
 local protectedIds = {}
 local protectedNames = {}
 local friendIds = {}
@@ -2749,6 +2771,8 @@ local function inRing(camera, center, plr)
 	return screen, world, distance
 end
 
+local STICKY_MARGIN = 1.15
+
 local function pickTarget(camera, center)
 	teamSplit = hasSplitTeams()
 	local best = nil
@@ -2763,6 +2787,20 @@ local function pickTarget(camera, center)
 			bestWorld = world
 			bestDistance = distance
 		end
+	end
+	local held = silent.locked
+	if held and held ~= best then
+		local screen, world, distance = inRing(camera, center, held)
+		if screen and distance <= bestDistance * STICKY_MARGIN then
+			best = held
+			bestScreen = screen
+			bestWorld = world
+		end
+	end
+	if best then
+		headWorld(best)
+	else
+		silent.worldPart = nil
 	end
 	silent.locked = best
 	return best, bestScreen, bestWorld
@@ -3228,6 +3266,13 @@ local function aimStep(dt)
 	local drawCenter = overlayPoint(center)
 	ring.Position = UDim2.fromOffset(drawCenter.X, drawCenter.Y)
 	cross.Position = UDim2.fromOffset(drawCenter.X, drawCenter.Y)
+	if screen and world then
+		local drawScreen = overlayPoint(screen)
+		placeLine(aimLine, drawCenter, drawScreen, 2)
+		aimDot.BackgroundTransparency = 0.1 + math.abs(math.sin(os.clock() * 5)) * 0.55
+	else
+		aimLine.Visible = false
+	end
 end
 
 local function bindAim()
@@ -3266,6 +3311,7 @@ local function setSilent(on)
 	silent.enabled = on
 	ring.Visible = on
 	cross.Visible = on
+	aimLine.Visible = false
 	silent.target = nil
 	silent.screen = nil
 	silent.world = nil
@@ -4660,7 +4706,7 @@ task.spawn(function()
 	end
 end)
 
-notify("aj.lol  v1.9", "welcome - silent aim, esp, noclip", 4.5)
+notify("aj.lol  v2.0", "welcome - silent aim, esp, noclip", 4.5)
 
 TweenService:Create(windowScale, TweenInfo.new(0.32, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
 	Scale = 1,
@@ -4686,4 +4732,4 @@ task.spawn(function()
 	end
 end)
 
-print("[aj.lol] loaded 1.9")
+print("[aj.lol] loaded 2.0")
