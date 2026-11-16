@@ -306,14 +306,13 @@ ui.tabBar = new("ScrollingFrame", {
 	BorderSizePixel = 0,
 	ScrollBarThickness = 0,
 	ScrollBarImageTransparency = 1,
-	CanvasSize = UDim2.new(0, 0, 1, 0),
-	AutomaticCanvasSize = Enum.AutomaticSize.X,
+	CanvasSize = UDim2.fromOffset(0, M.tabBarH),
 	ScrollingDirection = Enum.ScrollingDirection.X,
 	ZIndex = 2,
 }, {
 	new("UIListLayout", {
 		FillDirection = Enum.FillDirection.Horizontal,
-		Padding = UDim.new(0, compact and 3 or 10),
+		Padding = UDim.new(0, compact and 2 or 10),
 		SortOrder = Enum.SortOrder.LayoutOrder,
 		VerticalAlignment = Enum.VerticalAlignment.Center,
 	}),
@@ -323,6 +322,7 @@ ui.tabBar = new("ScrollingFrame", {
 	}),
 })
 ui.tabBar.Parent = body
+ui.tabCanvas = 0
 
 ui.tabIndicator = new("Frame", {
 	Name = "TabIndicator",
@@ -411,16 +411,14 @@ local controls = new("Frame", {
 	Name = "Controls",
 	AnchorPoint = Vector2.new(1, 0),
 	Position = UDim2.new(1, -(compact and 10 or 16), 0, (M.headerH - btnSize) / 2),
-	Size = UDim2.fromOffset(btnSize * 2 + 10, btnSize),
+	Size = UDim2.fromOffset(btnSize, btnSize),
 	BackgroundTransparency = 1,
 	ZIndex = 6,
 })
 controls.Parent = window
 
 local closeBtn = headerButton("x", -2, btnSize)
-local minBtn = headerButton("-", -(btnSize + 8), btnSize)
 closeBtn.Parent = controls
-minBtn.Parent = controls
 
 local contentPadding = new("UIPadding", {
 	PaddingTop = UDim.new(0, compact and 10 or 14),
@@ -1332,10 +1330,16 @@ local function makePage(name)
 	})
 	page.Parent = content
 
+	local okSize, textSize = pcall(function()
+		return game:GetService("TextService"):GetTextSize(name, M.tabText, THEME.FontMed, Vector2.new(1000, 100))
+	end)
+	local textWidth = okSize and textSize.X or (#name * M.tabText * 0.62)
+	local tabWidth = math.ceil(textWidth) + (compact and 10 or 26)
+	local tabGap = compact and 2 or 10
+
 	local tab = new("TextButton", {
 		Name = name,
-		AutomaticSize = Enum.AutomaticSize.X,
-		Size = UDim2.new(0, 0, 0, M.tabH),
+		Size = UDim2.fromOffset(tabWidth, M.tabH),
 		BackgroundTransparency = 1,
 		BorderSizePixel = 0,
 		Font = THEME.FontMed,
@@ -1343,13 +1347,14 @@ local function makePage(name)
 		TextSize = M.tabText,
 		TextColor3 = THEME.TextDim,
 		TextXAlignment = Enum.TextXAlignment.Center,
+		TextTruncate = Enum.TextTruncate.AtEnd,
 		AutoButtonColor = false,
 		LayoutOrder = nextOrder(),
 		ZIndex = 2,
 	}, {
 		new("UIPadding", {
-			PaddingLeft = UDim.new(0, compact and 5 or 12),
-			PaddingRight = UDim.new(0, compact and 5 or 12),
+			PaddingLeft = UDim.new(0, compact and 5 or 13),
+			PaddingRight = UDim.new(0, compact and 5 or 13),
 		}),
 	})
 
@@ -1400,6 +1405,8 @@ local function makePage(name)
 	end)
 
 	tab.Parent = ui.tabBar
+	ui.tabCanvas = ui.tabCanvas + tabWidth + tabGap
+	ui.tabBar.CanvasSize = UDim2.fromOffset(ui.tabCanvas + (compact and 16 or 44), M.tabBarH)
 	table.insert(pages, { page = page, tab = tab, select = select, paint = paint })
 	return page
 end
@@ -4803,28 +4810,6 @@ UserInputService.InputEnded:Connect(function(input)
 		or input.UserInputType == Enum.UserInputType.Touch then
 		drag.active = false
 	end
-end)
-
-local winState = { minimized = false, size = window.Size }
-
-local function setMinimized(state)
-	winState.minimized = state
-	local target
-	if state then
-		winState.size = window.Size
-		target = UDim2.new(winState.size.X.Scale, winState.size.X.Offset, 0, M.headerH + (compact and 12 or 18))
-	else
-		target = winState.size
-	end
-	content.Visible = not state
-	controls.Visible = not state
-	TweenService:Create(window, TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-		Size = target,
-	}):Play()
-end
-
-minBtn.MouseButton1Click:Connect(function()
-	guard(setMinimized, not winState.minimized)
 end)
 
 local reopen = new("TextButton", {
