@@ -2607,6 +2607,28 @@ local aimDot = new("Frame", {
 }, { corner(3) })
 aimDot.Parent = aimLine
 
+local assistLine = new("Frame", {
+	Name = "AssistLine",
+	AnchorPoint = Vector2.new(0.5, 0.5),
+	Position = UDim2.fromScale(0.5, 0.5),
+	Size = UDim2.fromOffset(0, 1),
+	BackgroundColor3 = THEME.AccentText,
+	BorderSizePixel = 0,
+	Visible = false,
+	ZIndex = 2,
+})
+assistLine.Parent = overlay
+
+local assistDot = new("Frame", {
+	AnchorPoint = Vector2.new(0.5, 0.5),
+	Position = UDim2.fromScale(1, 0.5),
+	Size = UDim2.fromOffset(6, 6),
+	BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+	BorderSizePixel = 0,
+	ZIndex = 3,
+}, { corner(3) })
+assistDot.Parent = assistLine
+
 local protectedIds = {}
 local protectedNames = {}
 local friendIds = {}
@@ -3304,13 +3326,14 @@ local function unbindAim()
 	end
 end
 
+local assist
+
 local function setSilent(on)
 	if on == silent.enabled then
 		return
 	end
 	silent.enabled = on
-	ring.Visible = on
-	cross.Visible = on
+	assist.refresh()
 	aimLine.Visible = false
 	silent.target = nil
 	silent.screen = nil
@@ -3326,6 +3349,252 @@ local function setSilent(on)
 		unbindAim()
 		silent.locked = nil
 		notify("silent aim off", "shots normal", 1.6)
+	end
+end
+
+-- aim assist: soft camera pull only, look stays yours, never snaps
+assist = {
+	enabled = false,
+	strength = 35,
+	target = nil,
+	locked = nil,
+	screen = nil,
+	world = nil,
+	bound = false,
+	bindName = "AJLOL_AimAssist",
+	stickyPx = 52,
+	lift = 1.4,
+	connection = nil,
+}
+
+function assist.point(plr)
+	local char = plr.Character
+	if not char then
+		return nil
+	end
+	local camera = workspace.CurrentCamera
+	local names = silent.bones[silent.bone] or silent.bones.Head
+	local chosen = nil
+	local nearest = nil
+	local nearestDistance = math.huge
+	for _, name in ipairs(names) do
+		local part = char:FindFirstChild(name) or char:FindFirstChild(name, true)
+		if part and part:IsA("BasePart") then
+			if silent.bone == "Nearest" then
+				local distance = camera and (part.Position - camera.CFrame.Position).Magnitude or 0
+				if distance < nearestDistance then
+					nearestDistance = distance
+					nearest = part
+				end
+			else
+				chosen = part
+				break
+			end
+		end
+	end
+	local part = chosen or nearest
+	if part then
+		return part.Position
+	end
+	local root = char:FindFirstChild("HumanoidRootPart") or char.PrimaryPart
+	if root and root:IsA("BasePart") then
+		return root.Position + Vector3.new(0, assist.lift, 0)
+	end
+	return nil
+end
+
+function assist.eligible(camera, center, plr)
+	if not stillValid(plr) then
+		return nil
+	end
+	local world = assist.point(plr)
+	if not world then
+		return nil
+	end
+	local point, onScreen = camera:WorldToViewportPoint(world)
+	if not onScreen or point.Z <= 0 then
+		return nil
+	end
+	local screen = Vector2.new(point.X, point.Y)
+	local offset = (screen - center).Magnitude
+	if offset > silent.fov then
+		return nil
+	end
+	return screen, world, (world - camera.CFrame.Position).Magnitude, offset
+end
+
+function assist.pick(camera, center)
+	if silent.enabled and silent.locked then
+		local screen, world, distance, offset = assist.eligible(camera, center, silent.locked)
+		if screen then
+			assist.locked = silent.locked
+			return silent.locked, screen, world, offset
+		end
+	end
+	local best = nil
+	local bestScreen = nil
+	local bestWorld = nil
+	local bestOffset = math.huge
+	local bestDistance = math.huge
+	for _, plr in ipairs(Players:GetPlayers()) do
+		local screen, world, distance, offset = assist.eligible(camera, center, plr)
+		if screen and (offset < bestOffset - 0.5
+			or (math.abs(offset - bestOffset) <= 0.5 and distance < bestDistance)) then
+			best = plr
+			bestScreen = screen
+			bestWorld = world
+			bestOffset = offset
+			bestDistance = distance
+		end
+	end
+	local held = assist.locked
+	if held and held ~= best then
+		local screen, world, distance, offset = assist.eligible(camera, center, held)
+		if screen and offset <= bestOffset + assist.stickyPx then
+			return held, screen, world, offset
+		end
+	end
+	if best then
+		assist.locked = best
+		return best, bestScreen, bestWorld, bestOffset
+	end
+	assist.locked = nil
+	return nil
+end
+
+function assist.step(dt)
+	if not assist.enabled then
+		return
+	end
+	local humanoid = getHumanoid()
+	if not humanoid or humanoid.Health <= 0 then
+		return
+	end
+	local camera = workspace.CurrentCamera
+	if not camera then
+		return
+	end
+	local viewport = camera.ViewportSize
+	local center = Vector2.new(viewport.X / 2, viewport.Y / 2)
+	local target, screen, world, offset = assist.pick(camera, center)
+	assist.target = target
+	assist.screen = screen
+	assist.world = world
+
+	refreshInset()
+	local drawCenter = overlayPoint(center)
+	ring.Position = UDim2.fromOffset(drawCenter.X, drawCenter.Y)
+	cross.Position = UDim2.fromOffset(drawCenter.X, drawCenter.Y)
+
+	if not screen or not world then
+		assistLine.Visible = false
+		return
+	end
+	local drawScreen = overlayPoint(screen)
+	placeLine(assistLine, drawCenter, drawScreen, 1)
+	assistLine.BackgroundTransparency = 0.45
+	assistDot.BackgroundTransparency = 0.25 + math.abs(math.sin(os.clock() * 5)) * 0.45
+
+	if assist.strength <= 0 then
+		return
+	end
+	local strength = math.clamp(assist.strength, 0, 100) / 100
+	local fov = math.max(silent.fov, 1)
+	local closeness = math.clamp(1 - (offset / fov) ^ 2, 0, 1)
+	local rate = (0.35 + strength * 11) * closeness
+	if rate <= 0.02 then
+		return
+	end
+	local step = math.min(dt or 0, 0.05)
+	if step <= 0 then
+		return
+	end
+	local from = camera.CFrame.Position
+	local delta = world - from
+	if delta.Magnitude < 0.25 then
+		return
+	end
+	local want = delta.Unit
+	local look = camera.CFrame.LookVector
+	local angle = math.acos(math.clamp(look:Dot(want), -1, 1))
+	if angle < math.rad(0.15) then
+		return
+	end
+	local alpha = 1 - math.exp(-rate * step)
+	local maxStep = math.rad(6 + strength * 10) * math.min(1, step * 60)
+	if angle * alpha > maxStep then
+		alpha = maxStep / angle
+	end
+	alpha = math.clamp(alpha, 0, 0.6)
+	camera.CFrame = camera.CFrame:Lerp(CFrame.lookAt(from, world), alpha)
+end
+
+function assist.refresh()
+	local reticle = silent.enabled or assist.enabled
+	ring.Visible = reticle
+	cross.Visible = reticle
+	if not silent.enabled then
+		aimLine.Visible = false
+	end
+	if not assist.enabled then
+		assistLine.Visible = false
+	end
+end
+
+function assist.bind()
+	if assist.bound then
+		return
+	end
+	assist.bound = true
+	local ok = pcall(function()
+		RunService:BindToRenderStep(assist.bindName, Enum.RenderPriority.Camera.Value + 2, assist.step)
+	end)
+	if not ok then
+		assist.bound = false
+		assist.connection = RunService.RenderStepped:Connect(assist.step)
+		assist.bound = true
+	end
+end
+
+function assist.unbind()
+	if not assist.bound then
+		return
+	end
+	assist.bound = false
+	pcall(function()
+		RunService:UnbindFromRenderStep(assist.bindName)
+	end)
+	if assist.connection then
+		assist.connection:Disconnect()
+		assist.connection = nil
+	end
+end
+
+function assist.set(on)
+	on = on and true or false
+	if on == assist.enabled then
+		return
+	end
+	assist.enabled = on
+	assist.target = nil
+	assist.locked = nil
+	assist.screen = nil
+	assist.world = nil
+	assistLine.Visible = false
+	assist.refresh()
+	if on then
+		assist.bind()
+		notify("aim assist on", string.format("soft lock %d%% - no snap", math.floor(assist.strength + 0.5)), 2)
+	else
+		assist.unbind()
+		notify("aim assist off", "look is yours", 1.6)
+	end
+end
+
+function assist.strengthSet(value)
+	assist.strength = math.clamp(value or 0, 0, 100)
+	if syncUi.assistStrength then
+		syncUi.assistStrength.set(assist.strength)
 	end
 end
 
@@ -4146,6 +4415,13 @@ local function silentChanged(on)
 	end
 end
 
+local function assistChanged(on)
+	assist.set(on)
+	if syncUi.assistCombat then
+		syncUi.assistCombat.set(on)
+	end
+end
+
 local playerBox = section(playerPage, "Player")
 makeToggle(playerBox, "Infinite Jump", false, setInfiniteJump)
 makeToggle(playerBox, "Noclip", false, setNoclip)
@@ -4178,6 +4454,8 @@ makeToggle(playerMisc, "Anti AFK", false, setAntiAfk)
 
 local combatUtil = section(combatPage, "Combat")
 syncUi.silentCombat = makeToggle(combatUtil, "Silent Aim", false, silentChanged)
+syncUi.assistCombat = makeToggle(combatUtil, "Aim Assist", false, assistChanged)
+syncUi.assistStrength = makeSlider(combatUtil, "Aim Assist Strength", 0, 100, 35, 0, assist.strengthSet)
 syncUi.fovCombat = makeSlider(combatUtil, "Aim FOV", 60, 420, 220, 0, setFov)
 syncUi.boneCombat = ui.dropdown(combatUtil, "Aim Bone", { "Head", "Chest", "Stomach", "Legs", "Nearest" }, 1, function(option)
 	silent.bone = option
@@ -4652,6 +4930,7 @@ handle.toggle = function()
 	end
 end
 handle.destroy = function()
+	assist.set(false)
 	setSilent(false)
 	setNoclip(false)
 	setInfiniteJump(false)
@@ -4700,9 +4979,10 @@ task.spawn(function()
 		if not label or not label.Parent then
 			break
 		end
-		label.Text = string.format("hooks %d  rays %d  remotes %d  %s",
+		label.Text = string.format("hooks %d  rays %d  remotes %d  %s%s",
 			#rayHooks, silent.stats.rays, silent.stats.remotes,
-			silent.enabled and "armed" or "off")
+			silent.enabled and "armed" or "off",
+			assist.enabled and " + assist" or "")
 	end
 end)
 
