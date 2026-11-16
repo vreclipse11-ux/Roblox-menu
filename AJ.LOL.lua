@@ -13,13 +13,13 @@ local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 local Camera = workspace.CurrentCamera
 
 local THEME = {
-	Window = Color3.fromRGB(11, 9, 15),
-	Panel = Color3.fromRGB(13, 11, 17),
-	Row = Color3.fromRGB(18, 15, 23),
-	RowBorder = Color3.fromRGB(38, 38, 48),
-	Line = Color3.fromRGB(30, 30, 38),
-	Card = Color3.fromRGB(21, 17, 28),
-	CardLine = Color3.fromRGB(36, 31, 46),
+	Window = Color3.fromRGB(8, 8, 11),
+	Panel = Color3.fromRGB(10, 10, 13),
+	Row = Color3.fromRGB(16, 16, 20),
+	RowBorder = Color3.fromRGB(36, 36, 44),
+	Line = Color3.fromRGB(28, 28, 35),
+	Card = Color3.fromRGB(13, 13, 17),
+	CardLine = Color3.fromRGB(32, 32, 40),
 	Accent = Color3.fromRGB(124, 58, 237),
 	AccentSoft = Color3.fromRGB(139, 92, 246),
 	AccentText = Color3.fromRGB(170, 88, 247),
@@ -43,11 +43,11 @@ if compact then
 	M = {
 		winW = math.floor(vp.X * 0.94),
 		winH = math.floor(vp.Y * 0.74),
-		headerH = 50,
-		sidebarW = 118,
-		tabH = 40,
-		tabText = 13,
-		titleSize = 22,
+		headerH = 44,
+		tabBarH = 36,
+		tabH = 32,
+		tabText = 11,
+		titleSize = 19,
 		sectionSize = 12,
 		labelSize = 12,
 		rowH = 40,
@@ -63,13 +63,13 @@ if compact then
 	}
 else
 	M = {
-		winW = math.min(860, math.floor(vp.X * 0.86)),
-		winH = math.min(500, math.floor(vp.Y * 0.76)),
-		headerH = 66,
-		sidebarW = 206,
-		tabH = 52,
+		winW = math.min(920, math.floor(vp.X * 0.88)),
+		winH = math.min(520, math.floor(vp.Y * 0.76)),
+		headerH = 54,
+		tabBarH = 46,
+		tabH = 42,
 		tabText = 17,
-		titleSize = 32,
+		titleSize = 24,
 		sectionSize = 15,
 		labelSize = 15,
 		rowH = 50,
@@ -298,33 +298,52 @@ local body = new("Frame", {
 })
 body.Parent = window
 
-local sidebar = new("ScrollingFrame", {
-	Name = "Sidebar",
+ui.tabBar = new("ScrollingFrame", {
+	Name = "Tabs",
 	Position = UDim2.fromOffset(0, M.headerH),
-	Size = UDim2.new(0, M.sidebarW, 1, -M.headerH),
-	BackgroundColor3 = THEME.Panel,
+	Size = UDim2.new(1, 0, 0, M.tabBarH),
+	BackgroundTransparency = 1,
 	BorderSizePixel = 0,
-	ScrollBarThickness = 2,
-	ScrollBarImageColor3 = THEME.CardLine,
-	ScrollBarImageTransparency = 0.15,
-	CanvasSize = UDim2.new(),
-	AutomaticCanvasSize = Enum.AutomaticSize.Y,
-	ScrollingDirection = Enum.ScrollingDirection.Y,
-	ZIndex = 1,
+	ScrollBarThickness = 0,
+	ScrollBarImageTransparency = 1,
+	CanvasSize = UDim2.new(0, 0, 1, 0),
+	AutomaticCanvasSize = Enum.AutomaticSize.X,
+	ScrollingDirection = Enum.ScrollingDirection.X,
+	ZIndex = 2,
 }, {
 	new("UIListLayout", {
-		Padding = UDim.new(0, compact and 4 or 6),
+		FillDirection = Enum.FillDirection.Horizontal,
+		Padding = UDim.new(0, compact and 3 or 10),
 		SortOrder = Enum.SortOrder.LayoutOrder,
-		HorizontalAlignment = Enum.HorizontalAlignment.Center,
+		VerticalAlignment = Enum.VerticalAlignment.Center,
 	}),
 	new("UIPadding", {
-		PaddingTop = UDim.new(0, compact and 8 or 12),
-		PaddingBottom = UDim.new(0, compact and 12 or 16),
-		PaddingLeft = UDim.new(0, compact and 6 or 10),
-		PaddingRight = UDim.new(0, compact and 6 or 10),
+		PaddingLeft = UDim.new(0, compact and 8 or 22),
+		PaddingRight = UDim.new(0, compact and 8 or 22),
 	}),
 })
-sidebar.Parent = body
+ui.tabBar.Parent = body
+
+ui.tabIndicator = new("Frame", {
+	Name = "TabIndicator",
+	AnchorPoint = Vector2.new(0, 1),
+	Position = UDim2.fromOffset(0, M.headerH + M.tabBarH),
+	Size = UDim2.fromOffset(0, 2),
+	BackgroundColor3 = THEME.Accent,
+	BorderSizePixel = 0,
+	ZIndex = 5,
+})
+ui.tabIndicator.Parent = body
+
+new("Frame", {
+	Name = "TabDivider",
+	Position = UDim2.fromOffset(0, M.headerH + M.tabBarH - 1),
+	Size = UDim2.new(1, 0, 0, 1),
+	BackgroundColor3 = THEME.Line,
+	BackgroundTransparency = 0.25,
+	BorderSizePixel = 0,
+	ZIndex = 1,
+}).Parent = body
 
 local header = new("Frame", {
 	Name = "Brand",
@@ -342,7 +361,7 @@ local title = new("TextLabel", {
 	Size = UDim2.fromScale(1, 1),
 	BackgroundTransparency = 1,
 	Font = THEME.FontBold,
-	Text = "aj.lol",
+	Text = "AJ.LOL",
 	TextSize = M.titleSize,
 	TextColor3 = THEME.Text,
 	TextXAlignment = Enum.TextXAlignment.Left,
@@ -412,8 +431,8 @@ local contentPadding = new("UIPadding", {
 
 local content = new("ScrollingFrame", {
 	Name = "Content",
-	Position = UDim2.fromOffset(M.sidebarW, M.headerH),
-	Size = UDim2.new(1, -M.sidebarW, 1, -M.headerH),
+	Position = UDim2.fromOffset(0, M.headerH + M.tabBarH),
+	Size = UDim2.new(1, 0, 1, -(M.headerH + M.tabBarH)),
 	BackgroundTransparency = 1,
 	BorderSizePixel = 0,
 	ScrollBarThickness = 3,
@@ -431,11 +450,11 @@ content.Parent = body
 
 ui.contentScale = new("UIScale", { Scale = 1 })
 ui.contentScale.Parent = content
-ui.contentPos = UDim2.fromOffset(M.sidebarW, M.headerH)
+ui.contentPos = UDim2.fromOffset(0, M.headerH + M.tabBarH)
 
 function ui.pageIn()
 	ui.contentScale.Scale = 0.985
-	content.Position = UDim2.fromOffset(M.sidebarW, M.headerH + 10)
+	content.Position = UDim2.fromOffset(0, M.headerH + M.tabBarH + 10)
 	TweenService:Create(content, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
 		Position = ui.contentPos,
 	}):Play()
@@ -443,6 +462,50 @@ function ui.pageIn()
 		Scale = 1,
 	}):Play()
 end
+
+function ui.tabMove(tab, animate)
+	if not tab then
+		return
+	end
+	if ui.tabTween then
+		ui.tabTween:Cancel()
+		ui.tabTween = nil
+	end
+	local function place()
+		local scale = windowScale.Scale
+		if scale <= 0 then
+			scale = 1
+		end
+		local x = (tab.AbsolutePosition.X - body.AbsolutePosition.X) / scale
+		local width = math.max(tab.TextBounds.X + 6, 1)
+		local tabWidth = math.max(tab.AbsoluteSize.X / scale, 1)
+		x = x + (tabWidth - width) / 2
+		local targetPos = UDim2.fromOffset(x, M.headerH + M.tabBarH)
+		local targetSize = UDim2.fromOffset(width, 2)
+		if animate and ui.tabPlaced then
+			ui.tabTween = TweenService:Create(ui.tabIndicator, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+				Position = targetPos,
+				Size = targetSize,
+			})
+			ui.tabTween:Play()
+		else
+			ui.tabIndicator.Position = targetPos
+			ui.tabIndicator.Size = targetSize
+			ui.tabPlaced = true
+		end
+	end
+	if ui.tabPlaced then
+		place()
+	else
+		task.defer(place)
+	end
+end
+
+ui.tabBar:GetPropertyChangedSignal("CanvasPosition"):Connect(function()
+	if ui.activeTab then
+		ui.tabMove(ui.activeTab, false)
+	end
+end)
 
 window.Parent = gui
 
@@ -471,10 +534,10 @@ local function section(parent, text)
 	new("TextLabel", {
 		Size = UDim2.new(1, 0, 0, M.sectionSize + 6),
 		BackgroundTransparency = 1,
-		Font = THEME.FontBold,
+		Font = THEME.FontMed,
 		Text = text,
 		TextSize = M.sectionSize,
-		TextColor3 = THEME.AccentText,
+		TextColor3 = THEME.TextDim,
 		TextXAlignment = Enum.TextXAlignment.Left,
 		LayoutOrder = 1,
 	}).Parent = holder
@@ -482,13 +545,11 @@ local function section(parent, text)
 	local box = new("Frame", {
 		Size = UDim2.new(1, 0, 0, 0),
 		AutomaticSize = Enum.AutomaticSize.Y,
-		BackgroundColor3 = THEME.Card,
+		BackgroundTransparency = 1,
 		BorderSizePixel = 0,
 		LayoutOrder = 2,
 		ClipsDescendants = true,
 	}, {
-		corner(M.radius),
-		stroke(THEME.CardLine, 1, 0.3),
 		new("UIListLayout", { Padding = UDim.new(0, 0), SortOrder = Enum.SortOrder.LayoutOrder }),
 		new("UIPadding", {
 			PaddingTop = UDim.new(0, 0),
@@ -1273,39 +1334,39 @@ local function makePage(name)
 
 	local tab = new("TextButton", {
 		Name = name,
-		Size = UDim2.new(1, 0, 0, M.tabH),
-		BackgroundColor3 = THEME.Accent,
+		AutomaticSize = Enum.AutomaticSize.X,
+		Size = UDim2.new(0, 0, 0, M.tabH),
 		BackgroundTransparency = 1,
 		BorderSizePixel = 0,
 		Font = THEME.FontMed,
 		Text = name,
 		TextSize = M.tabText,
 		TextColor3 = THEME.TextDim,
-		TextXAlignment = Enum.TextXAlignment.Left,
+		TextXAlignment = Enum.TextXAlignment.Center,
 		AutoButtonColor = false,
 		LayoutOrder = nextOrder(),
 		ZIndex = 2,
-	}, { corner(M.radius) })
-
-	new("UIPadding", { PaddingLeft = UDim.new(0, compact and 12 or 20) }).Parent = tab
+	}, {
+		new("UIPadding", {
+			PaddingLeft = UDim.new(0, compact and 5 or 12),
+			PaddingRight = UDim.new(0, compact and 5 or 12),
+		}),
+	})
 
 	local hovered = false
 
 	local function paint(active, animate)
-		local target = {
-			BackgroundTransparency = active and 0 or (hovered and 0.88 or 1),
-			TextColor3 = active and THEME.Text or (hovered and THEME.Text or THEME.TextDim),
-		}
+		local color = active and THEME.Text or (hovered and THEME.Text or THEME.TextDim)
 		if animate then
-			TweenService:Create(tab, TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), target):Play()
+			TweenService:Create(tab, TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+				TextColor3 = color,
+			}):Play()
 		else
-			tab.BackgroundTransparency = target.BackgroundTransparency
-			tab.TextColor3 = target.TextColor3
+			tab.TextColor3 = color
 		end
-		tab.Font = active and THEME.FontBold or THEME.FontMed
 	end
 
-	local function select()
+	local function select(animate)
 		for _, entry in pairs(pages) do
 			local active = entry.page == page
 			entry.page.Visible = active
@@ -1317,32 +1378,28 @@ local function makePage(name)
 		end
 		content.CanvasPosition = Vector2.new(0, 0)
 		activePage = page
+		ui.activeTab = tab
+		ui.tabMove(tab, animate == true)
 		ui.pageIn()
 	end
 
 	tab.MouseEnter:Connect(function()
 		hovered = true
 		if activePage ~= page then
-			TweenService:Create(tab, TweenInfo.new(0.12), {
-				TextColor3 = THEME.Text,
-				BackgroundTransparency = 0.88,
-			}):Play()
+			TweenService:Create(tab, TweenInfo.new(0.12), { TextColor3 = THEME.Text }):Play()
 		end
 	end)
 	tab.MouseLeave:Connect(function()
 		hovered = false
 		if activePage ~= page then
-			TweenService:Create(tab, TweenInfo.new(0.12), {
-				TextColor3 = THEME.TextDim,
-				BackgroundTransparency = 1,
-			}):Play()
+			TweenService:Create(tab, TweenInfo.new(0.12), { TextColor3 = THEME.TextDim }):Play()
 		end
 	end)
 	tab.MouseButton1Click:Connect(function()
-		select()
+		select(true)
 	end)
 
-	tab.Parent = sidebar
+	tab.Parent = ui.tabBar
 	table.insert(pages, { page = page, tab = tab, select = select, paint = paint })
 	return page
 end
